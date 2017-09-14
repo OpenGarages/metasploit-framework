@@ -33,7 +33,7 @@ module UDS
       end
       left2combine = hash["Packets"].size
       counter = 0
-      while left2combine.positive? && (bad_count < (hash["Packets"].size * 2))
+      while left2combine > 0 && (bad_count < (hash["Packets"].size * 2))
         # print_line("DEBUG Current status combine=#{left2combine} data=#{data.inspect}")
         hash["Packets"].each do |pkt|
           if (pkt.key? "ID") && pkt["ID"].hex == id.hex
@@ -405,7 +405,7 @@ module UDS
     end
     if (data.key? "Packets") && !data["Packets"].empty?
       data = response_hash_to_data_array(dst_id, data, 4)
-      if !data.empty? && data.even?
+      if !data.empty? && data.size.even?
         (0..data.size / 2).step(2) do |idx|
           code = ""
           case data[idx].hex & 0xC0 >> 3
@@ -633,7 +633,11 @@ module UDS
   # @param src_id [Integer] Integer representation of the Sending CAN ID
   # @param dst_id [Integer] Integer representation of the receiving CAN ID
   # @param level [Integer] The desired DSC level
+<<<<<<< HEAD
   # @param opt [Hash] Optional arguments.  PADDING
+=======
+  # @param opt [Hash] Optional arguments.  PADDING if set uses this hex value for padding
+>>>>>>> 7b87915e1fff390dfa24af5737f8c7e8c9acef03
   #
   # @return [Hash] client.automtoive response
   def set_dsc(bus, src_id, dst_id, level, opt = {})
@@ -730,7 +734,11 @@ module UDS
     padding = opt['PADDING'] if opt.key? 'PADDING'
     opt = {}
     opt["MAXPKTS"] = 15
+<<<<<<< HEAD
     opt['PADDING'] = padding if padding
+=======
+    opt["PADDING"] = padding unless padding.nil?
+>>>>>>> 7b87915e1fff390dfa24af5737f8c7e8c9acef03
     packets = client.automotive.send_isotp_and_wait_for_response(bus, src_id, dst_id, [0x22] + id, opt)
     return [] if packets.nil?
     if packets.key? "error"
@@ -753,7 +761,11 @@ module UDS
   # @param src_id [Integer] Integer representation of the Sending CAN ID
   # @param dst_id [Integer] Integer representation of the receiving CAN ID
   # @param level [Integer] Requested security access level. Default is 1
+<<<<<<< HEAD
   # @param opt [Hash] Optional settings.  PADDING
+=======
+  # @param opt [Hash] Optional settings.  PADDING if set uses this hex value for padding
+>>>>>>> 7b87915e1fff390dfa24af5737f8c7e8c9acef03
   #
   # @return [Hash] Packet Hash with { "SEED" => [ XX, XX ] }
   def get_security_token(bus, src_id, dst_id, level = 1, opt = {})
@@ -790,7 +802,11 @@ module UDS
   # @param dst_id [Integer] Integer representation of the receiving CAN ID
   # @param key [Array] Array of Hex to be used as the key.  Same size as the seed
   # @param response_level [Integer] Requested security access level response. Usually level + 1. Default is 2
+<<<<<<< HEAD
   # @param opt [Hash] Optional settings. PADDING
+=======
+  # @param opt [Hash] Optional settings. PADDING if set uses this hex value for padding
+>>>>>>> 7b87915e1fff390dfa24af5737f8c7e8c9acef03
   #
   # @return [Hash] packet response from client.automotoive
   def send_security_token_response(bus, src_id, dst_id, key, response_level = 2, opt = {})
@@ -829,7 +845,11 @@ module UDS
   # @param dst_id [Integer] Integer representation of the receiving CAN ID
   # @param id [Array] 2 Bytes in an array of the identifier.  Example [ 0xF1, 0x90 ]
   # @param data [Array] Array of bytes to write
+<<<<<<< HEAD
   # @param opt [Hash] Optional settings. PADDING
+=======
+  # @param opt [Hash] Optional settings. PADDING if set uses this hex value for padding
+>>>>>>> 7b87915e1fff390dfa24af5737f8c7e8c9acef03
   #
   # @return [Hash] Packet hash from client.automotive
   def write_data_by_id(bus, src_id, dst_id, id, data, opt = {})
@@ -913,7 +933,11 @@ module UDS
   # @param bus [String] unique CAN bus identifier
   # @param src_id [Integer] Integer representation of the Sending CAN ID
   # @param dst_id [Integer] Integer representation of the receiving CAN ID
+<<<<<<< HEAD
   # @param opt [Hash] Optional arguments such as PADDING
+=======
+  # @param opt [Hash] Optional arguments such as: PADDING if set uses this hex value for padding
+>>>>>>> 7b87915e1fff390dfa24af5737f8c7e8c9acef03
   #    SUPPRESS_RESPONSE By default suppress ACK from ECU.  Set to false if you want confirmation
   #
   # @return [Hash] Packet hash from client.automotive.  Typically blank unless suppress_response is false

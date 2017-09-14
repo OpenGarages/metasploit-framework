@@ -155,7 +155,7 @@ enbl = nil
 
 }
 
-unsupported if client.platform !~ /win32|win64/i
+unsupported if client.platform != 'windows'
 
 if enbl or (usr!= nil && pass != nil)
   message
@@ -166,7 +166,7 @@ if enbl or (usr!= nil && pass != nil)
   if (usr!= nil && pass != nil)
     addrdpusr(usr, pass)
   end
-  print_status("For cleanup use command: run multi_console_command -rc #{@dest}")
+  print_status("For cleanup use command: run multi_console_command -r #{@dest}")
 
 else
   usage

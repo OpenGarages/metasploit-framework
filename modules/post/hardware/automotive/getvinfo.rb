@@ -1,14 +1,11 @@
 ##
-# This module requires Metasploit: http://metasploit.com/download
+# This module requires Metasploit: https://metasploit.com/download
 # Current source: https://github.com/rapid7/metasploit-framework
 ##
 
-require 'msf/core'
-require 'rex'
 require 'msf/core/post/hardware/automotive/uds'
 
 class MetasploitModule < Msf::Post
-
   include Msf::Post::Hardware::Automotive::UDS
   include Msf::Post::Hardware::Automotive::DTC
 
@@ -29,7 +26,7 @@ class MetasploitModule < Msf::Post
       OptInt.new('PADDING', [false, "Optinal end of packet padding", nil]),
       OptBool.new('CLEAR_DTCS', [false, "Clear any DTCs and reset MIL if errors are present", false]),
       OptString.new('CANBUS', [false, "CAN Bus to perform scan on, defaults to connected bus", nil])
-    ], self.class)
+    ])
 
   end
 
@@ -105,5 +102,4 @@ class MetasploitModule < Msf::Post
       print_status("Cleared DTCs and reseting MIL")
     end
   end
-
 end
